@@ -65,16 +65,36 @@ int main() {
 
     // printf("%s\n", buffer.payload);
 
-    // New implementation
-    size_t bytes_read;
-    while ((bytes_read = recvfrom(listen_sockfd, buffer.payload, sizeof(buffer.payload), 0, (struct sockaddr*)&client_addr_from, &addr_size)) > 0) {
-        // printf("%s\n", buffer.payload);
-        if (fputs(buffer.payload, fp) < 0) {
-            perror("Could not write to file");
-            return -1;
-        }
-    }
+    // // New implementation
+    // while (recvfrom(listen_sockfd, buffer.payload, sizeof(buffer.payload), 0, (struct sockaddr*)&client_addr_from, &addr_size) > 0) {
+    //     // printf("%s\n", buffer.payload);
+    //     if (fputs(buffer.payload, fp) < 0) {
+    //         perror("Could not write to file");
+    //         return -1;
+    //     }
+    // }
     
+    while(1) {
+        recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
+
+        if (recv_len < 0) {
+            perror("Error receiving packet");
+            break;
+        }
+
+        // printf("%s%d\n", "This is the seqnum:", buffer.seqnum);
+
+        ack_pkt.seqnum = buffer.seqnum;
+        ack_pkt.acknum = buffer.seqnum;
+        sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+
+        fwrite(buffer.payload, 1, recv_len - 10, fp);
+
+        if (buffer.last) {
+            break;
+        }
+
+    }
 
     fclose(fp);
     close(listen_sockfd);
