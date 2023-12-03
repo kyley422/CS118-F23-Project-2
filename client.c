@@ -72,6 +72,13 @@ int main(int argc, char *argv[]) {
 
     // TODO: Read from file, and initiate reliable data transfer to the server
 
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+        printf("%s\n", buffer);
+        printf("%s\n", "END -------------------------- END ---------------------- END ---------------------- END ---------------------- END");
+        
+    }
+
  
     
     fclose(fp);
