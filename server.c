@@ -52,7 +52,28 @@ int main() {
     FILE *fp = fopen("output.txt", "wb");
 
     // TODO: Receive file from the client and save it as output.txt
+    // ssize_t bytes_read;
+    // while ((bytes_read = recv(send_sockfd, buffer.payload, sizeof(buffer.payload), 0)) > 0) {
+    //     printf("%s\n", buffer.payload);
+    // }
 
+    // if (recvfrom(listen_sockfd, buffer.payload, sizeof(buffer.payload), 0, (struct sockaddr*)&client_addr_from, addr_size) < 0) {
+    //     // printf("Did not recieve\n");
+    //     // return -1;
+    // }
+    
+
+    // printf("%s\n", buffer.payload);
+
+    // New implementation
+    size_t bytes_read;
+    while ((bytes_read = recvfrom(listen_sockfd, buffer.payload, sizeof(buffer.payload), 0, (struct sockaddr*)&client_addr_from, &addr_size)) > 0) {
+        // printf("%s\n", buffer.payload);
+        if (fputs(buffer.payload, fp) < 0) {
+            perror("Could not write to file");
+            return -1;
+        }
+    }
     
 
     fclose(fp);

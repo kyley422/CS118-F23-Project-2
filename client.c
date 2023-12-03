@@ -74,11 +74,15 @@ int main(int argc, char *argv[]) {
 
     size_t bytes_read;
     while ((bytes_read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-        printf("%s\n", buffer);
-        printf("%s\n", "END -------------------------- END ---------------------- END ---------------------- END ---------------------- END");
-        
-    }
+        memcpy(pkt.payload, buffer, bytes_read);
+        printf("%s\n",pkt.payload);
+        // send(send_sockfd, pkt.payload, sizeof(pkt.payload), 0);
 
+        if(sendto(send_sockfd, pkt.payload, strlen(pkt.payload), 0, (struct sockaddr*)&server_addr_to, addr_size) < 0) {
+            printf("Unable to send client message\n");
+            return -1;
+        }
+    }
  
     
     fclose(fp);
