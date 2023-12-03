@@ -90,21 +90,30 @@ int main(int argc, char *argv[]) {
         if (bytesRead == 0) {
             break;
         }
+        // printf("%lu\n", bytesRead);
 
-        pkt.seqnum = seq_num;
-        pkt.acknum = ack_num;
-        pkt.last = (bytesRead < PAYLOAD_SIZE) ? 1 : 0;
-        memset(pkt.payload, 0, PAYLOAD_SIZE);
+        // pkt.seqnum = seq_num;
+        // pkt.acknum = ack_num;
+        // pkt.ack = 0;
+        // pkt.length = 0;
+        // pkt.last = (bytesRead < PAYLOAD_SIZE) ? 1 : 0;
+
+        // printf("%.*s\0", (int)bytesRead, buffer);
+        
         memcpy(pkt.payload, buffer, bytesRead);
-        memset(buffer, 0, PAYLOAD_SIZE);
 
-        // printf("%.*s", (int)bytesRead, pkt.payload);
+        // printf("%.*s\0", (int)bytesRead, pkt.payload);
+        
 
-        if (sendto(send_sockfd, &pkt, sizeof(struct packet)+1, 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
+        
+
+        if (sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
             printf("Unable to send client message\n");
             return -1;
         }
-        seq_num++;
+
+        // memset(pkt.payload, 0, bytesRead);
+        // seq_num++;
 
     }
 

@@ -75,24 +75,39 @@ int main() {
     // }
     
     while(1) {
-        recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
-
-        if (recv_len < 0) {
-            perror("Error receiving packet");
-            break;
+        // recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
+        if ((recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
+            printf("Unable to recieve client message\n");
+            return -1;
         }
+
+        printf("%d\n", recv_len);
+        // printf("%s\0", buffer.payload);
+
+        // printf("%s\n", buffer.payload);
+        // printf("ENDD_________ENDDD_________________________END_____________________END\n");
+
+        // if (recv_len < 0) {
+        //     perror("Error receiving packet");
+        //     break;
+        // }
 
         // printf("%s%d\n", "This is the seqnum:", buffer.seqnum);
 
-        ack_pkt.seqnum = buffer.seqnum;
-        ack_pkt.acknum = buffer.seqnum;
-        sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
+        // ack_pkt.seqnum = buffer.seqnum;
+        // ack_pkt.acknum = buffer.seqnum;
+        // sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
 
-        fwrite(buffer.payload, 1, recv_len - 10, fp);
+        fwrite(buffer.payload, 1, recv_len - 12, fp);
+        // for (int i = 0; i < recv_len - 12; i++) {
+        //     fprintf(fp, "%c", buffer.payload[i]);
+        // }
 
-        if (buffer.last) {
-            break;
-        }
+        // printf("%s\n", buffer.payload);
+
+        // if (buffer.last) {
+        //     break;
+        // }
 
     }
 
