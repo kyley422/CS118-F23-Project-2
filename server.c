@@ -58,11 +58,10 @@ int main() {
             printf("Unable to recieve client message\n");
             return -1;
         }
-        fwrite(buffer.payload, 1, recv_len - 12, fp);
+        fwrite(buffer.payload, 1, buffer.length, fp);
+        printf("%s\n",buffer.payload);
         if (buffer.last == 1) {
-            // fwrite(buffer.payload, 1, sizeof(buffer), fp);
             printf("END!\n");
-            // fwrite('\0', 1, 1, fp);
             break;
         }
     }
