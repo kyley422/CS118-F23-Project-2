@@ -75,22 +75,14 @@ int main() {
     // }
     
     while(1) {
-        recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
-
-        if (recv_len < 0) {
-            perror("Error receiving packet");
-            break;
+        // recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
+        if ((recv_len = recvfrom(listen_sockfd, (char *)&buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
+            printf("Unable to recieve client message\n");
+            return -1;
         }
-
-        // printf("%s%d\n", "This is the seqnum:", buffer.seqnum);
-
-        ack_pkt.seqnum = buffer.seqnum;
-        ack_pkt.acknum = buffer.seqnum;
-        sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
-
-        fwrite(buffer.payload, 1, recv_len - 10, fp);
-
-        if (buffer.last) {
+        fwrite(buffer.payload, 1, buffer.length, fp);
+        printf("Pkt #%d received\n", buffer.seqnum);
+        if (buffer.last == 1) {
             break;
         }
 

@@ -71,41 +71,24 @@ int main(int argc, char *argv[]) {
     }
 
     // TODO: Read from file, and initiate reliable data transfer to the server
-
-    // // Read from file, send to server
-    // size_t bytes_read;
-    // while ((bytes_read = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-    //     memcpy(pkt.payload, buffer, bytes_read);
-    //     // printf("%s\n",pkt.payload);
-    //     // send(send_sockfd, pkt.payload, sizeof(pkt.payload), 0);
-
-    //     if(sendto(send_sockfd, pkt.payload, strlen(pkt.payload), 0, (struct sockaddr*)&server_addr_to, addr_size) < 0) {
-    //         printf("Unable to send client message\n");
-    //         return -1;
-    //     }
-    // }
-
+    int file_pos = 0;
+    size_t bytesRead;
+    seq_num = 0;
     while(1) {
-        size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
+        bytesRead = fread(buffer, 1, sizeof(buffer), fp);
+        build_packet(&pkt, seq_num, 0, 0, 0, bytesRead, buffer);
         if (bytesRead == 0) {
-            break;
+            pkt.last = 1;
         }
-
-        pkt.seqnum = seq_num;
-        pkt.acknum = ack_num;
-        pkt.last = (bytesRead < PAYLOAD_SIZE) ? 1 : 0;
-        memset(pkt.payload, 0, PAYLOAD_SIZE);
-        memcpy(pkt.payload, buffer, bytesRead);
-        memset(buffer, 0, PAYLOAD_SIZE);
-
-        // printf("%.*s", (int)bytesRead, pkt.payload);
-
-        if (sendto(send_sockfd, &pkt, sizeof(struct packet)+1, 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
+        sleep(0.001);
+        if (sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
             printf("Unable to send client message\n");
             return -1;
         }
         seq_num++;
-
+        if (bytesRead == 0) {
+            break;
+        }
     }
 
 
