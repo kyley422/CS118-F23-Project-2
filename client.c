@@ -84,12 +84,17 @@ int main(int argc, char *argv[]) {
     //         return -1;
     //     }
     // }
-
+    int file_pos = 0;
+    size_t bytesRead;
     while(1) {
-        size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
-        if (bytesRead == 0) {
-            break;
+        if (fseek(fp, file_pos, SEEK_SET) != 0) {
+            close(listen_sockfd);
+            close(send_sockfd);
+            return -1;
         }
+        file_pos += PAYLOAD_SIZE;
+        bytesRead = fread(buffer, 1, sizeof(buffer), fp);
+        
         // printf("%lu\n", bytesRead);
 
         // pkt.seqnum = seq_num;
@@ -100,19 +105,26 @@ int main(int argc, char *argv[]) {
 
         // printf("%.*s\0", (int)bytesRead, buffer);
         
-        memcpy(pkt.payload, buffer, bytesRead);
-
-        // printf("%.*s\0", (int)bytesRead, pkt.payload);
+        // memcpy(pkt.payload, buffer, bytesRead);
+        build_packet(&pkt, 0, 0, 0, 0, bytesRead, buffer);
+        printf("%.*s\0", (int)bytesRead, pkt.payload);
         
 
         
 
-        if (sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
+        if (sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
             printf("Unable to send client message\n");
             return -1;
         }
 
-        // memset(pkt.payload, 0, bytesRead);
+
+        if (bytesRead == 0) {
+            pkt.last = 1;
+            sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
+            break;
+        }
+
+        memset(pkt.payload, 0, bytesRead);
         // seq_num++;
 
     }

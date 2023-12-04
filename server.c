@@ -76,12 +76,12 @@ int main() {
     
     while(1) {
         // recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
-        if ((recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
+        if ((recv_len = recvfrom(listen_sockfd, (char *)&buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
             printf("Unable to recieve client message\n");
             return -1;
         }
 
-        printf("%d\n", recv_len);
+        // printf("%d\n", recv_len);
         // printf("%s\0", buffer.payload);
 
         // printf("%s\n", buffer.payload);
@@ -104,6 +104,11 @@ int main() {
         // }
 
         // printf("%s\n", buffer.payload);
+
+        if (buffer.last == 1) {
+            fwrite(buffer.payload, 1, recv_len - 12, fp);
+            return;
+        }
 
         // if (buffer.last) {
         //     break;
