@@ -105,11 +105,13 @@ int main(int argc, char *argv[]) {
 
         // printf("%.*s\0", (int)bytesRead, buffer);
         
-        // memcpy(pkt.payload, buffer, bytesRead);
+        memcpy(pkt.payload, buffer, bytesRead);
         build_packet(&pkt, 0, 0, 0, 0, bytesRead, buffer);
         printf("%.*s\0", (int)bytesRead, pkt.payload);
-        
-
+        // printf("AAbRnCFJ3e5CgtJBPLqYuk7hMMDMi5GNxsmWCoLh7Lqy50wR2wAMYRwmQuD9VAG6FcO9d6CfzjjNLuCApt9sIlBrLroherBmIMwpraVbyKn7zniBveVQUFKqENFrz2YwsNRAiPNlQMNZNZYAQQVykWc5EnsjO8rk4QGsB9VtHWFo8btQm0SFX8JO1lGgX0nXEXF4XLw5mdc9qc2j18o28bcTxNPp7lOPRFrDNGBXrMmJ8AgN0Yy0ZEZh1i3ccBqlWRiaoSWDSAUxFeGsPiNC29J70RHf7wMsdmMT3InUSH1Q6KrDK9hvWHY9whdmCZhUMbVzew7u6NEn2olQXONfDxdX35ME05GC26ipZb29RhNJZRSfB9m3HmuduFcQxLnyHQTAy3OwtUM26JSRbkFgsmlCr54Ygwo2nXjh0yw57U5e26DlAnPolSiuzInSj2RFKh6HGE2BFKdM9ql2o1xtJV6lbdkoGQUsfEo0HIIxy6cKIVfPo12u6gU6N5ZChxzaKJqWwbMxfx7exXNmugWPFfArL5w85qW3YP6CvjP4UMzVo5XYa4llvZCrjrmLjKcFZEDUTqupVcYbSNSgNH5U8tsNm2HtccgSwkByHJTcAdQ0eXBLkEpCpAo8kSBReA5n10lEY9bVOtA6ArXqRQ5jsKhsJHwL62PFiwPfBKKbf8EJEFvy1764jqScqCa823WXWjif3iUaDbOsHe5A6MAMscYxmu2PeOdPWBVQnTGQCAT1WW71W9P78ZOagVUJe5qbGVhtsTqZkSdRYYqVjR8BrBxtqv3bf2KQbu8xvH2E37ytSckllS0vQHZaxRXvL8W7JFOCRAGWT6f67DnS67Do1qRWNMrvckqClXgyg1XAZVvzbl6w2W0elLsYYs3IllfuReKCtOOi4WXRsbN4uhnOboytbtvKEBy57axJ9ozo9ePg5gpXL1R2DJcxoL0iMqOxHB4kc1v8nNJ5IwH2Tblp1fWpLHpG4ZovbTAiPA6xuqqUFotJ2NOwim9wK6B2UaQO");        
+        if (bytesRead == 0) {
+            pkt.last = 1;
+        }
         
 
         if (sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
@@ -118,13 +120,13 @@ int main(int argc, char *argv[]) {
         }
 
 
-        if (bytesRead == 0) {
-            pkt.last = 1;
-            sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
-            break;
-        }
+        // if (bytesRead == 0) {
+        //     pkt.last = 1;
+        //     sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
+        //     break;
+        // }
 
-        memset(pkt.payload, 0, bytesRead);
+        // memset(pkt.payload, 0, bytesRead);
         // seq_num++;
 
     }

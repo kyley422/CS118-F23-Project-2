@@ -52,68 +52,19 @@ int main() {
     FILE *fp = fopen("output.txt", "wb");
 
     // TODO: Receive file from the client and save it as output.txt
-    // ssize_t bytes_read;
-    // while ((bytes_read = recv(send_sockfd, buffer.payload, sizeof(buffer.payload), 0)) > 0) {
-    //     printf("%s\n", buffer.payload);
-    // }
-
-    // if (recvfrom(listen_sockfd, buffer.payload, sizeof(buffer.payload), 0, (struct sockaddr*)&client_addr_from, addr_size) < 0) {
-    //     // printf("Did not recieve\n");
-    //     // return -1;
-    // }
-    
-
-    // printf("%s\n", buffer.payload);
-
-    // // New implementation
-    // while (recvfrom(listen_sockfd, buffer.payload, sizeof(buffer.payload), 0, (struct sockaddr*)&client_addr_from, &addr_size) > 0) {
-    //     // printf("%s\n", buffer.payload);
-    //     if (fputs(buffer.payload, fp) < 0) {
-    //         perror("Could not write to file");
-    //         return -1;
-    //     }
-    // }
-    
     while(1) {
         // recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
         if ((recv_len = recvfrom(listen_sockfd, (char *)&buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
             printf("Unable to recieve client message\n");
             return -1;
         }
-
-        // printf("%d\n", recv_len);
-        // printf("%s\0", buffer.payload);
-
-        // printf("%s\n", buffer.payload);
-        // printf("ENDD_________ENDDD_________________________END_____________________END\n");
-
-        // if (recv_len < 0) {
-        //     perror("Error receiving packet");
-        //     break;
-        // }
-
-        // printf("%s%d\n", "This is the seqnum:", buffer.seqnum);
-
-        // ack_pkt.seqnum = buffer.seqnum;
-        // ack_pkt.acknum = buffer.seqnum;
-        // sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, sizeof(client_addr_to));
-
         fwrite(buffer.payload, 1, recv_len - 12, fp);
-        // for (int i = 0; i < recv_len - 12; i++) {
-        //     fprintf(fp, "%c", buffer.payload[i]);
-        // }
-
-        // printf("%s\n", buffer.payload);
-
         if (buffer.last == 1) {
-            fwrite(buffer.payload, 1, recv_len - 12, fp);
-            return;
+            // fwrite(buffer.payload, 1, sizeof(buffer), fp);
+            printf("END!\n");
+            // fwrite('\0', 1, 1, fp);
+            break;
         }
-
-        // if (buffer.last) {
-        //     break;
-        // }
-
     }
 
     fclose(fp);
