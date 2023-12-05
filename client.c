@@ -72,9 +72,12 @@ int main(int argc, char *argv[]) {
 
     // TODO: Read from file, and initiate reliable data transfer to the server
     int file_pos = 0;
-    size_t bytesRead;
+    ssize_t bytesRead;
+    ssize_t recv_len;
     seq_num = 0;
+    char window[sizeof(pkt)*4];
     while(1) {
+        // Send packet
         bytesRead = fread(buffer, 1, sizeof(buffer), fp);
         build_packet(&pkt, seq_num, 0, 0, 0, bytesRead, buffer);
         if (bytesRead == 0) {
@@ -82,13 +85,20 @@ int main(int argc, char *argv[]) {
         }
         sleep(0.001);
         if (sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
-            printf("Unable to send client message\n");
+            perror("Error sending client message\n");
             return -1;
         }
         seq_num++;
         if (bytesRead == 0) {
             break;
         }
+
+        // Receive ACK
+        if ((recv_len = recvfrom(listen_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_from, &addr_size)) < 0) {
+            perror("Error receiving ACK");
+            return -1;
+        }
+        printf("ACK #%d received\n", pkt.acknum);
     }
 
 
