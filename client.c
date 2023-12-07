@@ -7,10 +7,31 @@
 
 #include "utils.h"
 
+#define WINDOW_SIZE 5
+#define TIMEOUT_SEC 1
+
+struct packet window[WINDOW_SIZE];
+time_t sent_times[WINDOW_SIZE];
+
+// Function to send a packet to the server
+void send_packet(int send_sockfd, struct packet *pkt, struct sockaddr_in *server_addr_to, socklen_t addr_size) {
+    sendto(send_sockfd, pkt, sizeof(struct packet), 0, (struct sockaddr *)server_addr_to, addr_size);
+}
+
+// Function to retransmit unacknowledged packets in the window
+void retransmit_packets(int send_sockfd, struct sockaddr_in *server_addr_to, socklen_t addr_size, int *seq_num) {
+    for (int i = 0; i < WINDOW_SIZE; ++i) {
+        if (window[i].seqnum != 0 && time(NULL) - sent_times[i] >= TIMEOUT_SEC) {
+            // Retransmit the packet if not acknowledged within the timeout
+            send_packet(send_sockfd, &window[i], server_addr_to, addr_size);
+            sent_times[i] = time(NULL);  // Update the sent time
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
-    struct sockaddr_in client_addr, server_addr_to, server_addr_from;
+    struct sockaddr_in client_addr, server_addr_to;
     socklen_t addr_size = sizeof(server_addr_to);
     struct timeval tv;
     struct packet pkt;
@@ -18,10 +39,8 @@ int main(int argc, char *argv[]) {
     char buffer[PAYLOAD_SIZE];
     unsigned short seq_num = 0;
     unsigned short ack_num = 0;
-    char last = 0;
-    char ack = 0;
 
-    // read filename from command line argument
+    // read filename from the command line argument
     if (argc != 2) {
         printf("Usage: ./client <filename>\n");
         return 1;
@@ -70,39 +89,66 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // TODO: Read from file, and initiate reliable data transfer to the server
-    int file_pos = 0;
-    ssize_t bytesRead;
-    ssize_t recv_len;
-    seq_num = 0;
-    char window[sizeof(pkt)*4];
-    while(1) {
-        // Send packet
-        bytesRead = fread(buffer, 1, sizeof(buffer), fp);
-        build_packet(&pkt, seq_num, 0, 0, 0, bytesRead, buffer);
-        if (bytesRead == 0) {
-            pkt.last = 1;
+    // Initialize the sliding window and sent times
+    memset(window, 0, sizeof(window));
+    memset(sent_times, 0, sizeof(sent_times));
+
+    while (1) {
+        for (int i = 0; i < WINDOW_SIZE; ++i) {
+            if (window[i].seqnum == 0) {
+                size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
+                if (bytesRead == 0) {
+                    break;
+                }
+                build_packet(&pkt, seq_num, ack_num, 0, 0, bytesRead, buffer);
+                send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+
+                window[i] = pkt;
+                sent_times[i] = time(NULL);
+
+                seq_num++;
+            }
         }
-        sleep(0.001);
-        if (sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
-            perror("Error sending client message\n");
-            return -1;
+
+        // ACK Timeout
+        tv.tv_sec = TIMEOUT_SEC;
+        tv.tv_usec = 0;
+        setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
+
+        // Receive acknowledgments
+        while (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
+            // Check if the acknowledgment is for a packet in the window
+            printf("Received ACK# %u\n", ack_pkt.acknum);
+            for (int i = 0; i < WINDOW_SIZE; ++i) {
+                if (window[i].seqnum == ack_pkt.acknum) {
+                    // Remove the acknowledged packet from the window
+                    window[i].seqnum = 0;
+                    window[i].acknum = 0;
+                    memset(window[i].payload, 0, PAYLOAD_SIZE);
+                }
+            }
         }
-        seq_num++;
-        if (bytesRead == 0) {
+
+        // Check if all packets in the window are acknowledged
+        int allAcknowledged = 1;
+        for (int i = 0; i < WINDOW_SIZE; ++i) {
+            if (window[i].seqnum != 0) {
+                allAcknowledged = 0;
+                break;
+            }
+        }
+
+        if (!allAcknowledged) {
+            // Retransmit unacknowledged packets in the window
+            retransmit_packets(send_sockfd, &server_addr_to, addr_size, &seq_num);
+        }
+
+        if (allAcknowledged && feof(fp)) {
+            // All packets in the window are acknowledged, and there is no more data to send
             break;
         }
-
-        // Receive ACK
-        if ((recv_len = recvfrom(listen_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_from, &addr_size)) < 0) {
-            perror("Error receiving ACK");
-            return -1;
-        }
-        printf("ACK #%d received\n", pkt.acknum);
     }
 
-
-    
     fclose(fp);
     close(listen_sockfd);
     close(send_sockfd);
