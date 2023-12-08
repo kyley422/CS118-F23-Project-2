@@ -7,6 +7,27 @@
 
 #include "utils.h"
 
+#define WINDOW_SIZE 5
+#define TIMEOUT_SEC 1
+
+struct packet window[WINDOW_SIZE];
+time_t sent_times[WINDOW_SIZE];
+
+// Function to send a packet to the server
+void send_packet(int send_sockfd, struct packet *pkt, struct sockaddr_in *server_addr_to, socklen_t addr_size) {
+    sendto(send_sockfd, pkt, sizeof(struct packet), 0, (struct sockaddr *)server_addr_to, addr_size);
+}
+
+// Function to retransmit unacknowledged packets in the window
+void retransmit_packets(int send_sockfd, struct sockaddr_in *server_addr_to, socklen_t addr_size, int *seq_num) {
+    for (int i = 0; i < WINDOW_SIZE; ++i) {
+        if (window[i].seqnum != 0 && time(NULL) - sent_times[i] >= TIMEOUT_SEC) {
+            // Retransmit the packet if not acknowledged within the timeout
+            send_packet(send_sockfd, &window[i], server_addr_to, addr_size);
+            sent_times[i] = time(NULL);  // Update the sent time
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     int listen_sockfd, send_sockfd;
@@ -42,7 +63,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Configure the server address structure to which we will send data
+    // Configure the server address structure
     memset(&server_addr_to, 0, sizeof(server_addr_to));
     server_addr_to.sin_family = AF_INET;
     server_addr_to.sin_port = htons(SERVER_PORT_TO);
@@ -61,7 +82,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Open file for reading
     FILE *fp = fopen(filename, "rb");
     if (fp == NULL) {
         perror("Error opening file");
@@ -70,39 +90,65 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // TODO: Read from file, and initiate reliable data transfer to the server
+    // Initialize the sliding window and sent times
+    memset(window, 0, sizeof(window));
+    memset(sent_times, 0, sizeof(sent_times));
 
-    int file_pos = 0;
-    size_t bytesRead;
-    seq_num = 0;
-    while(1) {
-        bytesRead = fread(buffer, 1, sizeof(buffer), fp);
-        
-        memcpy(pkt.payload, buffer, bytesRead);
-        build_packet(&pkt, seq_num, 0, 0, 0, bytesRead, buffer);
-        // printf("%.*s\0", (int)bytesRead, pkt.payload);
-        printf("AAbRnCFJ3e5CgtJBPLqYuawefi5GNxsmWCoLh7Lqy50wR2wAMYwmQuD9VAG6FcO9d6CfzaaajjNLuCApt9sIlBrLroherBmIMwpraVbyKn7zniBveVQUFKqENFrz2YwsNRAiPNlQMNZNZYAQQVykWc5EnsjO8rk4QGsB9VtHWFo8btQm0SFX8JO1lGgX0nXEXF4XLw5mdc9qc2j18o28bcTxNPp7lOPRFrDNGBXrMmJ8AgN0Yy0ZEZh1i3ccBqlWRiaoSWDSAUxFeGsPiNC29J70RHf7wMsdmMT3InUSH1Q6KrDK9hvWHY9whdmCZhUMbVzew7u6NEn2olQXONfDxdX35ME05GC26ipZb29RhNJZRSfB9m3HmuduFcQxLnyHQTAy3OwtUM26JSRbkFgsmlCr54Ygwo2nXjh0yw57U5e26DlAnPolSiuzInSj2RFKh6HGE2BFKdM9ql2o1xtJV6lbdkoGQUsfEo0HIIxy6cKIVfPo12u6gU6N5ZChxzaKJqWwbMxfx7exXNmugWPFfArL5w85qW3YP6CvjP4UMzVo5XYa4llvZCrjrmLjKcFZEDUTqupVcYbSNSgNH5U8tsNm2HtccgSwkByHJTcAdQ0eXBLkEpCpAo8kSBReA5n10lEY9bVOtA6ArXqRQ5jsKhsJHwL62PFiwPfBKKbf8EJEFvy1764jqScqCa823WXWjif3iUaDbOsHe5A6MAMscYxmu2PeOdPWBVQnTGQCAT1WW71W9P78ZOagVUJe5qbGVhtsTqZkSdRYYqVjR8BrBxtqv3bf2KQbu8xvH2E37ytSckllS0vQHZaxRXvL8W7JFOCRAGWT6f67DnS67Do1qRWNMrvckqClXgyg1XAZVvzbl6w2W0elLsYYs3IllfuReKCtOOi4WXRsbN4uhnOboytbtvKEBy57axJ9ozo9ePg5gpXL1R2DJcxoL0iMqOxHB4kc1v8nNJ5IwH2Tblp1fWpLHpG4ZovbTAiPA6xuqqUFotJ2NOwim9wK6B2UaQO");        
-        // printf("\n\n");
-        if (bytesRead == 0) {
-            pkt.last = 1;
+    while (1) {
+        for (int i = 0; i < WINDOW_SIZE; ++i) {
+            if (window[i].seqnum == 0) {
+                size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
+                
+                build_packet(&pkt, seq_num, ack_num, 0, 0, bytesRead, buffer);
+                send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+
+                if (bytesRead == 0) {
+                    build_packet(&pkt, seq_num, ack_num, 1, 0, bytesRead, buffer);
+                    send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+                    break;
+                }
+
+                window[i] = pkt;
+                sent_times[i] = time(NULL);
+
+                seq_num++;
+            }
+        }
+        // ACK Timeout
+        tv.tv_sec = TIMEOUT_SEC;
+        tv.tv_usec = 0;
+        setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
+
+        // Receive acknowledgments
+        while (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
+            // Check if the acknowledgment is for a packet in the window
+            printf("Received ACK# %u\n", ack_pkt.acknum);
+            for (int i = 0; i < WINDOW_SIZE; ++i) {
+                if (window[i].seqnum == ack_pkt.acknum) {
+                    // Remove the acknowledged packet from the window
+                    window[i].seqnum = 0;
+                    window[i].acknum = 0;
+                    memset(window[i].payload, 0, PAYLOAD_SIZE);
+                }
+            }
         }
 
-        if (sendto(send_sockfd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&server_addr_to, addr_size) < 0) {
-            printf("Unable to send client message\n");
-            return -1;
+        // Check if all packets in the window are acknowledged
+        int allAcknowledged = 1;
+        for (int i = 0; i < WINDOW_SIZE; ++i) {
+            if (window[i].seqnum != 0) {
+                allAcknowledged = 0;
+                break;
+            }
         }
-        seq_num++;
 
+        if (!allAcknowledged) {
+            retransmit_packets(send_sockfd, &server_addr_to, addr_size, &seq_num);
+        }
 
-        // if (bytesRead == 0) {
-        //     pkt.last = 1;
-        //     sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
-        //     break;
-        // }
-
-        // memset(pkt.payload, 0, bytesRead);
-        // seq_num++;
-
+        if (allAcknowledged && feof(fp)) {
+            break;
+        }
     }
 
 

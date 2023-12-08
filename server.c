@@ -3,8 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdbool.h>
+#include <sys/param.h>
 
 #include "utils.h"
+
+#define WINDOW_SIZE 4 // Adjust the window size as needed
+
+typedef struct {
+    struct packet pkt;
+    bool ack_received;
+    bool written_to_file;
+} Frame;
 
 int main() {
     int listen_sockfd, send_sockfd;
@@ -50,19 +60,105 @@ int main() {
 
     // Open the target file for writing (always write to output.txt)
     FILE *fp = fopen("output.txt", "wb");
+    if (fp == NULL) {
+        perror("Error opening file");
+        return 1;
+    }
 
-    // TODO: Receive file from the client and save it as output.txt
-    while(1) {
-        // recv_len = recvfrom(listen_sockfd, &buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size);
-        if ((recv_len = recvfrom(listen_sockfd, (char *)&buffer, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
-            printf("Unable to recieve client message\n");
-            return -1;
+    Frame frames[WINDOW_SIZE];
+    int base = 0;
+    int next_seq_num = 0;
+    bool transmission_complete = false;
+
+    while (!transmission_complete) {
+        // Receive packets for the current window
+        while (next_seq_num - base < WINDOW_SIZE) {
+            struct timeval timeout = {5, 0}; // Set timeout for 5 seconds
+
+            fd_set readfds;
+            FD_ZERO(&readfds);
+            FD_SET(listen_sockfd, &readfds);
+
+            int activity = select(listen_sockfd + 1, &readfds, NULL, NULL, &timeout);
+
+            if (activity == -1) {
+                perror("Error in select");
+                return -1;
+            } else if (activity == 0) {
+                printf("Timeout occurred. Resending ACKs...\n");
+
+                // Resend ACKs for all packets in the window
+                for (int i = base; i < next_seq_num; ++i) {
+                    if (!frames[i % WINDOW_SIZE].ack_received) {
+                        build_packet(&frames[i % WINDOW_SIZE].pkt, 0, frames[i % WINDOW_SIZE].pkt.seqnum, 0, 1, 1, "0");
+                        if (sendto(send_sockfd, &frames[i % WINDOW_SIZE].pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
+                            perror("Error sending ACK\n");
+                            return -1;
+                        }
+
+                        printf("Resent ACK for pkt #%d\n", frames[i % WINDOW_SIZE].pkt.seqnum);
+                    }
+                }
+            } else {
+                struct packet received_pkt;
+                if ((recvfrom(listen_sockfd, (char *)&received_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
+                    printf("Unable to receive client message\n");
+                    return -1;
+                }
+                
+                // Don't add packet to window if duplicate
+                printf("RECEIVED PKT #:%d\n", received_pkt.seqnum);
+                printf("NEXT EXPECTED SEQ #:%d\n", next_seq_num);
+                frames[received_pkt.seqnum % WINDOW_SIZE].pkt = received_pkt;
+                frames[received_pkt.seqnum % WINDOW_SIZE].ack_received = true;
+                frames[received_pkt.seqnum % WINDOW_SIZE].written_to_file = false;
+                next_seq_num++;
+            }
         }
-        fwrite(buffer.payload, 1, buffer.length, fp);
-        printf("%s\n",buffer.payload);
-        if (buffer.last == 1) {
-            printf("END!\n");
-            break;
+        
+        Frame frames_copy[WINDOW_SIZE] = {0};
+        memcpy(frames_copy, frames, sizeof(frames));
+
+        // Send ACKs for received packets
+        for (int i = base; i < next_seq_num; ++i) {
+            build_packet(&frames_copy[i % WINDOW_SIZE].pkt, 0, MIN(frames_copy[i % WINDOW_SIZE].pkt.seqnum, next_seq_num), 0, 1, 1, "0");
+            if (sendto(send_sockfd, &frames_copy[i % WINDOW_SIZE].pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
+                perror("Error sending ACK\n");
+                return -1;
+            }
+            printf("ACK pkt #%d\n", frames[i % WINDOW_SIZE].pkt.seqnum);
+        }
+        printf("==========Window==========\n");
+        printf("Frame:\n");
+        for (int j = base; j < next_seq_num; ++j) {
+            printf("%d,", frames[j % WINDOW_SIZE].pkt.seqnum);
+            // printf("Payload: %s\n", frames[i].pkt.payload);
+        }
+        printf("\n");
+
+        // Check if all packets in the window have been received and write to file
+        bool all_received = true;
+        for (int i = base; i < next_seq_num; ++i) {
+            if (!frames[i % WINDOW_SIZE].ack_received) {
+                all_received = false;
+                break;
+            }
+        }
+
+        if (all_received) {
+            for (int i = base; i < next_seq_num; ++i) {
+                if (!frames[i % WINDOW_SIZE].written_to_file) {
+                    fwrite(frames[i % WINDOW_SIZE].pkt.payload, 1, frames[i % WINDOW_SIZE].pkt.length, fp);
+                    frames[i % WINDOW_SIZE].written_to_file = true;
+                    printf("Writing to file: Pkt #%d\n", frames[i % WINDOW_SIZE].pkt.seqnum);
+                }
+            }
+            base = next_seq_num;
+        }
+
+        // Check for completion
+        if (frames[(next_seq_num - 1) % WINDOW_SIZE].pkt.last == 1) {
+            transmission_complete = true;
         }
     }
 
