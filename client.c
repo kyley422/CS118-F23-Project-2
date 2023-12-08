@@ -7,7 +7,7 @@
 
 #include "utils.h"
 
-#define WINDOW_SIZE 5
+#define WINDOW_SIZE 4
 #define TIMEOUT_SEC 1
 
 struct packet window[WINDOW_SIZE];
