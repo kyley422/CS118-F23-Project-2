@@ -21,7 +21,7 @@
 // You may change this if you want to
 struct packet {
     int seqnum;
-    unsigned short acknum;
+    int acknum;
     char ack;
     char last;
     unsigned int length;
