@@ -115,10 +115,10 @@ int main(int argc, char *argv[]) {
     clear_frames(frames);
 
     while (1) {
-        for (int i=0; i<WINDOW_SIZE; ++i) {
-            printf("%d,", frames[i].pkt.seqnum);
-        }
-        printf("\n");
+        // for (int i=0; i<WINDOW_SIZE; ++i) {
+        //     printf("%d,", frames[i].pkt.seqnum);
+        // }
+        // printf("\n");
 
         if (seq_num != 0) {
         // Receive acknowledgments
@@ -131,16 +131,40 @@ int main(int argc, char *argv[]) {
                 frames[(ack_pkt.acknum) % WINDOW_SIZE].pkt.seqnum = -1;
                 expected_ack_num++;
 
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    printf("%d,", frames[i].pkt.seqnum);
+                }
+                printf("\n");
+                break;
+
               } else if (ack_pkt.acknum >= expected_ack_num) {
                 printf("Recieved ACK:%d > Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
+                // for (int i=expected_ack_num % WINDOW_SIZE; i<=(ack_pkt.acknum)-expected_ack_num+1; ++i) {
+                //     frames[i].pkt.seqnum = -1;
+                // }
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    if (frames[i].pkt.seqnum <= ack_pkt.acknum)
+                        frames[i].pkt.seqnum = -1;
+                }
                 expected_ack_num = ack_pkt.acknum+1;
+
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    printf("%d,", frames[i].pkt.seqnum);
+                }
+                printf("\n");
+
                 break;
               }
               else {
                 printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
                 build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, sizeof(frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE]), frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
-                expected_ack_num = ack_pkt.acknum+1;
+                // expected_ack_num = ack_pkt.acknum+1;
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    printf("%d,", frames[i].pkt.seqnum);
+                }
+                printf("\n");
+                break;
               }
           }
         }
