@@ -94,41 +94,25 @@ int main(int argc, char *argv[]) {
         // Receive acknowledgments
           while (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
             // Check if the acknowledgment is for a packet in the window
-            // printf("Received ACK#: %u\n", ack_pkt.acknum);
               if (ack_pkt.acknum == expected_ack_num) {
-                printf("Recieved ACK:%d same as Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
                 // Successful ACK advance by window by 1
                 frames[(ack_pkt.acknum) % WINDOW_SIZE].pkt.seqnum = -1;
                 expected_ack_num++;
 
-                for (int i=0; i<WINDOW_SIZE; ++i) {
-                    printf("%d,", frames[i].pkt.seqnum);
-                }
-                printf("\n");
                 break;
 
               } else if (ack_pkt.acknum >= expected_ack_num) {
-                printf("Recieved ACK:%d > Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
                 for (int i=0; i<WINDOW_SIZE; ++i) {
                     if (frames[i].pkt.seqnum <= ack_pkt.acknum)
                         frames[i].pkt.seqnum = -1;
                 }
                 expected_ack_num = ack_pkt.acknum+1;
 
-                for (int i=0; i<WINDOW_SIZE; ++i) {
-                    printf("%d,", frames[i].pkt.seqnum);
-                }
-                printf("\n");
                 break;
               }
               else {
-                printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
                 build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.length, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
-                for (int i=0; i<WINDOW_SIZE; ++i) {
-                    printf("%d,", frames[i].pkt.seqnum);
-                }
-                printf("\n");
                 break;
               }
           }
@@ -138,7 +122,6 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < WINDOW_SIZE; ++i) {
             if (frames[i % WINDOW_SIZE].pkt.seqnum == -1) { 
                 size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
-                // printf("sending seq#: %d, entry:%d\n", seq_num, frames[(seq_num - base) % WINDOW_SIZE].pkt.seqnum);
 
                 build_packet(&pkt, seq_num, ack_num, 0, 0, bytesRead, buffer);
                 frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
@@ -147,11 +130,6 @@ int main(int argc, char *argv[]) {
                 
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
 
-                if (bytesRead == 0) {
-                    build_packet(&pkt, seq_num, ack_num, 1, 0, bytesRead, buffer);
-                    send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
-                    break;
-                }
                 seq_num++;
             }
         }
@@ -160,6 +138,8 @@ int main(int argc, char *argv[]) {
         // tv.tv_usec = 0;
         // setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
         if (feof(fp)) {
+            build_packet(&pkt, seq_num, ack_num, 1, 0, 0, buffer);
+            send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
             break;
         }
     }

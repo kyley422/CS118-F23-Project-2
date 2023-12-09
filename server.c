@@ -91,14 +91,12 @@ int main() {
                 return -1;
             } else if (activity == 0) {
                 if (transmission_began) {
-                    printf("Timeout occurred. Resending ACKs...\n");
                     // Send last successful ACK
                     build_packet(&ack_pkt, 0, last_successful_ack, 0, 1, 1, "0");
                     if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                         perror("Error sending ACK\n");
                         return -1;
                     }
-                    printf("Re:ACK pkt #%d\n", last_successful_ack);
                 }
             } else {
                 struct packet received_pkt;
@@ -109,11 +107,8 @@ int main() {
                 transmission_began = true;
                 
                 // Don't add packet to window if duplicate
-                printf("BASE: %u\n", base);
-                printf("RECEIVED PKT #%d\n", received_pkt.seqnum);
                 // Check if packet is last packet
                 if(received_pkt.last == 1) {
-                    printf("TRANSMISSION COMPLETE\n");
                     transmission_complete = true;
                     break;
                 }
@@ -123,7 +118,6 @@ int main() {
                     if (1) {
                         for (int i = 0; i < WINDOW_SIZE; ++i) {
                             if (frames[i].pkt.seqnum == -1) {
-                                printf("PKT #%d added @ pos %d\n", received_pkt.seqnum, i);
                                 frames[i].pkt = received_pkt;
                                 frames[i].ack_sent = true;
                                 frames[i].written_to_file = false;
@@ -136,10 +130,7 @@ int main() {
                         do {
                             for (int i = 0; i < WINDOW_SIZE; ++i) {
                                 if (frames[i].pkt.seqnum == next_seq_num) {
-                                    // fprintf(fp, "=====Begin Packet %d=====\n", frames[i].pkt.seqnum);
                                     fwrite(frames[i].pkt.payload, 1, frames[i].pkt.length, fp);
-                                    // fprintf(fp, "\n=====End Packet %d=====\n", frames[i].pkt.seqnum);
-                                    printf("Writing to file: Pkt #%d\n", frames[i].pkt.seqnum);
                                     next_seq_num++;
                                     frames[i].pkt.seqnum = -1;
                                     has_written = true;
@@ -155,7 +146,6 @@ int main() {
                             perror("Error sending ACK\n");
                             return -1;
                         }
-                        printf("ACK pkt #%d\n", ack_pkt.acknum);
                         last_successful_ack = ack_pkt.acknum;
                         next_seq_num = last_successful_ack + 1;
                         base = next_seq_num;
@@ -163,14 +153,12 @@ int main() {
                     }
                 }
                 else if (received_pkt.seqnum < base) {
-                    printf("Dropped duplicate packet %d\n", received_pkt.seqnum);
                     // Send ACK for out of bounds receive: ACK last successful
                     build_packet(&ack_pkt, 0, last_successful_ack, 0, 1, 1, "0");
                     if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                         perror("Error sending ACK\n");
                         return -1;
                     }
-                    printf("ACK pkt #%d\n", last_successful_ack);
                 }
                 else {
                     // Send ACK for out of bounds receive: ACK last successful
@@ -179,15 +167,7 @@ int main() {
                         perror("Error sending ACK\n");
                         return -1;
                     }
-                    printf("ACK pkt #%d\n", last_successful_ack);
                 }
-                printf("NEXT EXPECTED SEQ #:%d\n", next_seq_num);
-                printf("==========Window==========\n");
-                printf("Frame:\n");
-                for (int i = 0; i < WINDOW_SIZE; i++) {
-                    printf("%d,", frames[i].pkt.seqnum);
-                }
-                printf("\n");
             }
         }
     }
