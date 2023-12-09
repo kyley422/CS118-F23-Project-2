@@ -122,7 +122,7 @@ int main() {
                 printf("BASE: %u\n", base);
                 printf("RECEIVED PKT #:%d\n", received_pkt.seqnum);
                 // Check if packet is outside of window
-                if (received_pkt.seqnum >= base) {
+                if (received_pkt.seqnum >= base && received_pkt.seqnum < base + WINDOW_SIZE) {
                     // Check if packet is already in place (check for dup), add it
                     if (frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt.seqnum == -1) {
                         printf("PKT #%d added\n", received_pkt.seqnum);
@@ -146,6 +146,15 @@ int main() {
                             next_seq_num++;
                         }
                     }
+                }
+                else {
+                    // Send ACK for out of bounds receive: ACK last successful
+                    build_packet(&ack_pkt, 0, last_successful_ack, 0, 1, 1, "0");
+                    if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
+                        perror("Error sending ACK\n");
+                        return -1;
+                    }
+                    printf("ACK pkt #%d\n", last_successful_ack);
                 }
                 printf("NEXT EXPECTED SEQ #:%d\n", next_seq_num);
                 printf("==========Window==========\n");
