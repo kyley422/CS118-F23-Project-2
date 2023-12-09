@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdbool.h>
 
 #include "utils.h"
 
@@ -12,6 +13,19 @@
 
 struct packet window[WINDOW_SIZE];
 time_t sent_times[WINDOW_SIZE];
+
+typedef struct {
+    struct packet pkt;
+    bool ack_received;
+    bool is_read;
+} Frame;
+
+// Function to clear frames array; sets all pkt sequence numbers to -1
+void clear_frames(Frame frames[]) {
+    for (int i = 0; i < WINDOW_SIZE; i++) {
+        frames[i].pkt.seqnum = -1;
+    }
+}
 
 // Function to send a packet to the server
 void send_packet(int send_sockfd, struct packet *pkt, struct sockaddr_in *server_addr_to, socklen_t addr_size) {
@@ -91,15 +105,59 @@ int main(int argc, char *argv[]) {
     }
 
     // Initialize the sliding window and sent times
-    memset(window, 0, sizeof(window));
-    memset(sent_times, 0, sizeof(sent_times));
+    // memset(window, 0, sizeof(window));
+    // memset(sent_times, 0, sizeof(sent_times));
+
+    Frame frames[WINDOW_SIZE];
+    int base = 0;
+    int expected_ack_num = 0;
+
+    clear_frames(frames);
 
     while (1) {
+        for (int i=0; i<WINDOW_SIZE; ++i) {
+            printf("%d,", frames[i].pkt.seqnum);
+        }
+        printf("\n");
+
+        if (seq_num != 0) {
+        // Receive acknowledgments
+          while (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
+            // Check if the acknowledgment is for a packet in the window
+            //   printf("Received ACK#: %u\n", ack_pkt.acknum);
+              if (ack_pkt.acknum == expected_ack_num) {
+                printf("Recieved ACK:%d same as Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
+                // Successful ACK advance by window by 1
+                frames[(ack_pkt.acknum) % WINDOW_SIZE].pkt.seqnum = -1;
+                expected_ack_num++;
+
+              } else if (ack_pkt.acknum >= expected_ack_num) {
+                printf("Recieved ACK:%d > Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
+                expected_ack_num = ack_pkt.acknum+1;
+                break;
+              }
+              else {
+                printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
+                build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, sizeof(frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE]), frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
+                send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+                expected_ack_num = ack_pkt.acknum+1;
+              }
+          }
+        }
+
+        
         for (int i = 0; i < WINDOW_SIZE; ++i) {
-            if (window[i].seqnum == 0) {
+            if (frames[i % WINDOW_SIZE].pkt.seqnum == -1) { 
                 size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
-                
+
+                // printf("sending seq#: %d, entry:%d\n", seq_num, frames[(seq_num - base) % WINDOW_SIZE].pkt.seqnum);
+
                 build_packet(&pkt, seq_num, ack_num, 0, 0, bytesRead, buffer);
+                frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
+                frames[(seq_num - base) % WINDOW_SIZE].ack_received = false;
+                frames[(seq_num - base) % WINDOW_SIZE].is_read = true;
+                
+                
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
 
                 if (bytesRead == 0) {
@@ -108,7 +166,8 @@ int main(int argc, char *argv[]) {
                     break;
                 }
 
-                window[i] = pkt;
+
+                // window[i] = pkt;
                 sent_times[i] = time(NULL);
 
                 seq_num++;
@@ -119,36 +178,24 @@ int main(int argc, char *argv[]) {
         tv.tv_usec = 0;
         setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
 
-        // Receive acknowledgments
-        while (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
-            // Check if the acknowledgment is for a packet in the window
-            printf("Received ACK# %u\n", ack_pkt.acknum);
-            for (int i = 0; i < WINDOW_SIZE; ++i) {
-                if (window[i].seqnum == ack_pkt.acknum) {
-                    // Remove the acknowledged packet from the window
-                    window[i].seqnum = 0;
-                    window[i].acknum = 0;
-                    memset(window[i].payload, 0, PAYLOAD_SIZE);
-                }
-            }
-        }
+       
 
-        // Check if all packets in the window are acknowledged
-        int allAcknowledged = 1;
-        for (int i = 0; i < WINDOW_SIZE; ++i) {
-            if (window[i].seqnum != 0) {
-                allAcknowledged = 0;
-                break;
-            }
-        }
+        // // Check if all packets in the window are acknowledged
+        // int allAcknowledged = 1;
+        // for (int i = 0; i < WINDOW_SIZE; ++i) {
+        //     if (window[i].seqnum != 0) {
+        //         allAcknowledged = 0;
+        //         break;
+        //     }
+        // }
 
-        if (!allAcknowledged) {
-            retransmit_packets(send_sockfd, &server_addr_to, addr_size, &seq_num);
-        }
+        // if (!allAcknowledged) {
+        //     retransmit_packets(send_sockfd, &server_addr_to, addr_size, &seq_num);
+        // }
 
-        if (allAcknowledged && feof(fp)) {
-            break;
-        }
+        // if (allAcknowledged && feof(fp)) {
+        //     break;
+        // }
     }
 
 
