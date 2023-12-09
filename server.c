@@ -16,12 +16,7 @@ typedef struct {
     bool written_to_file;
 } Frame;
 
-// Function to clear frames array; sets all pkt sequence numbers to -1
-void clear_frames(Frame frames[]) {
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-        frames[i].pkt.seqnum = -1;
-    }
-}
+
 
 int main() {
     int listen_sockfd, send_sockfd;
@@ -79,14 +74,16 @@ int main() {
     int next_seq_num = 0;
     bool transmission_complete = false;
 
-    // Initialize frames to empty
-    clear_frames(frames);
+    // Initialize array to empty
+    for (int i = 0; i < WINDOW_SIZE; i++) {
+        frames[i].pkt.seqnum = -1;
+    }
 
     while (!transmission_complete) {
         // Receive packets for the current window
         bool all_received = true;
         while (next_seq_num - base < WINDOW_SIZE) {
-            struct timeval timeout = {5, 0}; // Set timeout for 5 seconds
+            struct timeval timeout = {1, 0}; // Set timeout for 5 seconds
 
             fd_set readfds;
             FD_ZERO(&readfds);
@@ -128,15 +125,33 @@ int main() {
                 
                 // Don't add packet to window if duplicate
                 printf("BASE: %u\n", base);
-                printf("RECEIVED PKT #:%d\n", received_pkt.seqnum);
+                printf("RECEIVED PKT #%d\n", received_pkt.seqnum);
+                // Check if packet is last packet
+                if(received_pkt.last == 1) {
+                    printf("TRANSMISSION COMPLETE\n");
+                    transmission_complete = true;
+                    break;
+                }
                 // Check if packet is outside of window
                 if (received_pkt.seqnum >= base && received_pkt.seqnum < base + WINDOW_SIZE) {
                     // Check if packet is already in place (check for dup), add it
-                    if (frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt.seqnum == -1) {
-                        printf("PKT #%d added\n", received_pkt.seqnum);
-                        frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt = received_pkt;
-                        frames[(received_pkt.seqnum - base) % WINDOW_SIZE].ack_sent = true;
-                        frames[(received_pkt.seqnum - base) % WINDOW_SIZE].written_to_file = false;
+                    // if (frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt.seqnum == -1) {
+                    //     printf("PKT #%d added\n", received_pkt.seqnum);
+                    //     frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt = received_pkt;
+                    //     frames[(received_pkt.seqnum - base) % WINDOW_SIZE].ack_sent = true;
+                    //     frames[(received_pkt.seqnum - base) % WINDOW_SIZE].written_to_file = false;
+
+                    // Add packet to empty spot in window
+                    if (1) {
+                        for (int i = 0; i < WINDOW_SIZE; ++i) {
+                            if (frames[i].pkt.seqnum == -1) {
+                                printf("PKT #%d added @ pos %d\n", received_pkt.seqnum, i);
+                                frames[i].pkt = received_pkt;
+                                frames[i].ack_sent = true;
+                                frames[i].written_to_file = false;
+                                break;
+                            }
+                        }
 
                         // // Check if all packets in the window have been received
                         // for (int i = 0; i < WINDOW_SIZE; ++i) {
@@ -154,21 +169,39 @@ int main() {
                         //     ack_num = next_seq_num - 1;
                         // }
 
-                        int ack_num = last_successful_ack;
-                        // Check for consecutive packet
-                        if (received_pkt.seqnum == last_successful_ack + 1) {
-                            ack_num++;
-                        }
-                        for (int i = ack_num; i < base + WINDOW_SIZE - 1; ++i) {
-                            if (frames[(i + 1) % WINDOW_SIZE].pkt.seqnum == ack_num + 1) {
-                                ack_num++;
+                        // int ack_num = last_successful_ack;
+                        // // Check for consecutive packet
+                        // if (received_pkt.seqnum == last_successful_ack + 1) {
+                        //     ack_num++;
+                        // }
+                        // // ACK if received OOO
+                        // for (int i = ack_num; i < base + WINDOW_SIZE - 1; ++i) {
+                        //     if (frames[(i + 1) % WINDOW_SIZE].pkt.seqnum == ack_num + 1) {
+                        //         ack_num++;
+                        //     }
+                        // }
+
+                        // Write newly if possible: if newly arrived packet arrives at index base
+                        bool has_written = false;
+                        do {
+                            for (int i = 0; i < WINDOW_SIZE; ++i) {
+                                if (frames[i].pkt.seqnum == next_seq_num) {
+                                    // fprintf(fp, "=====Begin Packet %d=====\n", frames[i].pkt.seqnum);
+                                    fwrite(frames[i].pkt.payload, 1, frames[i].pkt.length, fp);
+                                    // fprintf(fp, "\n=====End Packet %d=====\n", frames[i].pkt.seqnum);
+                                    printf("Writing to file: Pkt #%d\n", frames[i].pkt.seqnum);
+                                    next_seq_num++;
+                                    frames[i].pkt.seqnum = -1;
+                                    has_written = true;
+                                    break;
+                                }
+                                has_written = false;
                             }
-                        }
-                        
+                        } while (has_written);
 
                         // ACK Packet
-                        // build_packet(&ack_pkt, 0, MIN(received_pkt.seqnum, next_seq_num), 0, 1, 1, "0");
-                        build_packet(&ack_pkt, 0, ack_num, 0, 1, 1, "0");
+                        // build_packet(&ack_pkt, 0, ack_num, 0, 1, 1, "0");
+                        build_packet(&ack_pkt, 0, next_seq_num-1, 0, 1, 1, "0");
                         if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                             perror("Error sending ACK\n");
                             return -1;
@@ -176,11 +209,15 @@ int main() {
                         printf("ACK pkt #%d\n", ack_pkt.acknum);
                         last_successful_ack = ack_pkt.acknum;
 
+                        
+
                         // Check if the received packet matches the expected seqnum before incrementing, else we are missing packet
                         // if (received_pkt.seqnum == next_seq_num) {
                         //     next_seq_num++;
                         // }
                         next_seq_num = last_successful_ack + 1;
+                        base = next_seq_num;
+                        
                     }
                 }
                 else if (received_pkt.seqnum < base) {
@@ -213,32 +250,27 @@ int main() {
             }
         }
 
-        // Check if all packets in the window have been received and write to file
-        for (int i = base; i < next_seq_num; ++i) {
-            if (!frames[i % WINDOW_SIZE].ack_sent) {
-                all_received = false;
-                break;
-            }
-        }
+        // // Check if all packets in the window have been received and write to file
+        // for (int i = base; i < next_seq_num; ++i) {
+        //     if (!frames[i % WINDOW_SIZE].ack_sent) {
+        //         all_received = false;
+        //         break;
+        //     }
+        // }
 
-        if (all_received) {
-            for (int i = base; i < next_seq_num; ++i) {
-                if (!frames[i % WINDOW_SIZE].written_to_file) {
-                    fwrite(frames[i % WINDOW_SIZE].pkt.payload, 1, frames[i % WINDOW_SIZE].pkt.length, fp);
-                    frames[i % WINDOW_SIZE].written_to_file = true;
-                    printf("Writing to file: Pkt #%d\n", frames[i % WINDOW_SIZE].pkt.seqnum);
-                }
-            }
-            base = next_seq_num;
-            clear_frames(frames);
-        }
+        // if (all_received) {
+        //     for (int i = base; i < next_seq_num; ++i) {
+        //         if (!frames[i % WINDOW_SIZE].written_to_file) {
+        //             fwrite(frames[i % WINDOW_SIZE].pkt.payload, 1, frames[i % WINDOW_SIZE].pkt.length, fp);
+        //             frames[i % WINDOW_SIZE].written_to_file = true;
+        //             printf("Writing to file: Pkt #%d\n", frames[i % WINDOW_SIZE].pkt.seqnum);
+        //         }
+        //     }
+        //     base = next_seq_num;
+        //     clear_frames(frames);
+        // }
 
-        // Check for completion
-        for (int i = 0; i < WINDOW_SIZE; ++i) {
-            if(frames[i].pkt.last == 1) {
-                transmission_complete = true;
-            }
-        }
+        
     }
 
     fclose(fp);

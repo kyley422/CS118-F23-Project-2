@@ -20,12 +20,7 @@ typedef struct {
     bool is_read;
 } Frame;
 
-// Function to clear frames array; sets all pkt sequence numbers to -1
-void clear_frames(Frame frames[]) {
-    for (int i = 0; i < WINDOW_SIZE; i++) {
-        frames[i].pkt.seqnum = -1;
-    }
-}
+
 
 // Function to send a packet to the server
 void send_packet(int send_sockfd, struct packet *pkt, struct sockaddr_in *server_addr_to, socklen_t addr_size) {
@@ -112,7 +107,10 @@ int main(int argc, char *argv[]) {
     int base = 0;
     int expected_ack_num = 0;
 
-    clear_frames(frames);
+    // Initialize array to empty
+    for (int i = 0; i < WINDOW_SIZE; i++) {
+        frames[i].pkt.seqnum = -1;
+    }
 
     while (1) {
         // for (int i=0; i<WINDOW_SIZE; ++i) {
@@ -157,7 +155,7 @@ int main(int argc, char *argv[]) {
               }
               else {
                 printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
-                build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, sizeof(frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE]), frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
+                build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.length, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
                 // expected_ack_num = ack_pkt.acknum+1;
                 for (int i=0; i<WINDOW_SIZE; ++i) {
@@ -217,9 +215,9 @@ int main(int argc, char *argv[]) {
         //     retransmit_packets(send_sockfd, &server_addr_to, addr_size, &seq_num);
         // }
 
-        // if (allAcknowledged && feof(fp)) {
-        //     break;
-        // }
+        if (feof(fp)) {
+            break;
+        }
     }
 
 
