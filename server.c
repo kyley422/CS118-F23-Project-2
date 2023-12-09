@@ -147,6 +147,7 @@ int main() {
                         // }
 
                         // // Calculate ACK number, if frames is full, ACK should go to next window, else ACK as usual
+                        // Choose ACK number: if received packet's seqnum is the next in order, ACK the packet, else we received OOO, send last successful ACK
                         // int ack_num = ((received_pkt.seqnum != 0) && (received_pkt.seqnum == last_successful_ack + 1)) ? received_pkt.seqnum : last_successful_ack;
                         // if (all_received) {
                         //     next_seq_num = base + WINDOW_SIZE;
@@ -154,16 +155,19 @@ int main() {
                         // }
 
                         int ack_num = last_successful_ack;
-                        for (int i = 0; i < WINDOW_SIZE; ++i) {
-                            if (frames[i].pkt.seqnum != ack_num + 1) {
-                                break;
-                            }
-                            ack_num = frames[i].pkt.seqnum;
+                        // Check for consecutive packet
+                        if (received_pkt.seqnum == last_successful_ack + 1) {
+                            ack_num++;
                         }
+                        for (int i = ack_num; i < base + WINDOW_SIZE - 1; ++i) {
+                            if (frames[(i + 1) % WINDOW_SIZE].pkt.seqnum == ack_num + 1) {
+                                ack_num++;
+                            }
+                        }
+                        
 
                         // ACK Packet
                         // build_packet(&ack_pkt, 0, MIN(received_pkt.seqnum, next_seq_num), 0, 1, 1, "0");
-                        // Choose ACK number: if received packet's seqnum is the next in order, ACK the packet, else we received OOO, send last successful ACK
                         build_packet(&ack_pkt, 0, ack_num, 0, 1, 1, "0");
                         if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                             perror("Error sending ACK\n");
@@ -173,10 +177,21 @@ int main() {
                         last_successful_ack = ack_pkt.acknum;
 
                         // Check if the received packet matches the expected seqnum before incrementing, else we are missing packet
-                        if (received_pkt.seqnum == next_seq_num) {
-                            next_seq_num++;
-                        }
+                        // if (received_pkt.seqnum == next_seq_num) {
+                        //     next_seq_num++;
+                        // }
+                        next_seq_num = last_successful_ack + 1;
                     }
+                }
+                else if (received_pkt.seqnum < base) {
+                    printf("Dropped duplicate packet %d\n", received_pkt.seqnum);
+                    // Send ACK for out of bounds receive: ACK last successful
+                    build_packet(&ack_pkt, 0, last_successful_ack, 0, 1, 1, "0");
+                    if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
+                        perror("Error sending ACK\n");
+                        return -1;
+                    }
+                    printf("ACK pkt #%d\n", last_successful_ack);
                 }
                 else {
                     // Send ACK for out of bounds receive: ACK last successful
@@ -219,8 +234,10 @@ int main() {
         }
 
         // Check for completion
-        if (frames[(next_seq_num - 1) % WINDOW_SIZE].pkt.last == 1) {
-            transmission_complete = true;
+        for (int i = 0; i < WINDOW_SIZE; ++i) {
+            if(frames[i].pkt.last == 1) {
+                transmission_complete = true;
+            }
         }
     }
 
