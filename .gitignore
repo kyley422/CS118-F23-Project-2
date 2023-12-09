@@ -1,5 +1,4 @@
 .vscode
 client
 server
-input.txt
-output.txt
+*.txt

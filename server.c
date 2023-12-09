@@ -12,7 +12,7 @@
 
 typedef struct {
     struct packet pkt;
-    bool ack_received;
+    bool ack_sent;
     bool written_to_file;
 } Frame;
 
@@ -74,6 +74,8 @@ int main() {
 
     Frame frames[WINDOW_SIZE];
     int base = 0;
+    // Most recently ACKed packet
+    int last_successful_ack = 0;
     int next_seq_num = 0;
     bool transmission_complete = false;
 
@@ -99,7 +101,7 @@ int main() {
 
                 // Resend ACKs for all packets in the window
                 for (int i = base; i < next_seq_num; ++i) {
-                    if (!frames[i % WINDOW_SIZE].ack_received) {
+                    if (!frames[i % WINDOW_SIZE].ack_sent) {
                         build_packet(&frames[i % WINDOW_SIZE].pkt, 0, frames[i % WINDOW_SIZE].pkt.seqnum, 0, 1, 1, "0");
                         if (sendto(send_sockfd, &frames[i % WINDOW_SIZE].pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                             perror("Error sending ACK\n");
@@ -125,16 +127,19 @@ int main() {
                     if (frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt.seqnum == -1) {
                         printf("PKT #%d added\n", received_pkt.seqnum);
                         frames[(received_pkt.seqnum - base) % WINDOW_SIZE].pkt = received_pkt;
-                        frames[(received_pkt.seqnum - base) % WINDOW_SIZE].ack_received = true;
+                        frames[(received_pkt.seqnum - base) % WINDOW_SIZE].ack_sent = true;
                         frames[(received_pkt.seqnum - base) % WINDOW_SIZE].written_to_file = false;
 
                         // ACK Packet
-                        build_packet(&ack_pkt, 0, MIN(received_pkt.seqnum, next_seq_num), 0, 1, 1, "0");
+                        // build_packet(&ack_pkt, 0, MIN(received_pkt.seqnum, next_seq_num), 0, 1, 1, "0");
+                        // Choose ACK number: if received packet's seqnum is the next in order, ACK the packet, else we received OOO, send last successful ACK
+                        build_packet(&ack_pkt, 0, (received_pkt.seqnum == last_successful_ack + 1) ? received_pkt.seqnum : last_successful_ack, 0, 1, 1, "0");
                         if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
                             perror("Error sending ACK\n");
                             return -1;
                         }
                         printf("ACK pkt #%d\n", ack_pkt.acknum);
+                        last_successful_ack = ack_pkt.acknum;
 
                         // Check if the received packet matches the expected seqnum before incrementing, else we are missing packet
                         if (received_pkt.seqnum == next_seq_num) {
@@ -156,7 +161,7 @@ int main() {
         // Check if all packets in the window have been received and write to file
         bool all_received = true;
         for (int i = base; i < next_seq_num; ++i) {
-            if (!frames[i % WINDOW_SIZE].ack_received) {
+            if (!frames[i % WINDOW_SIZE].ack_sent) {
                 all_received = false;
                 break;
             }
