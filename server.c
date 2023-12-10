@@ -130,7 +130,7 @@ int main() {
                     perror("Error sending ACK\n");
                     return -1;
                 }
-                printf("ACK pkt #%d\n", ack_pkt.acknum);
+                // printf("ACK pkt #%d\n", ack_pkt.acknum);
                 last_successful_ack = ack_pkt.acknum;
                 next_seq_num = last_successful_ack + 1;
                 base = next_seq_num;
@@ -144,7 +144,7 @@ int main() {
                 perror("Error sending ACK\n");
                 return -1;
             }
-            printf("ACK pkt #%d\n", last_successful_ack);
+            // printf("ACK pkt #%d\n", last_successful_ack);
         }
         // printf("NEXT EXPECTED SEQ #:%d\n", next_seq_num);
         // printf("==========Window==========\n");
