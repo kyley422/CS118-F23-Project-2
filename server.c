@@ -62,6 +62,13 @@ int main() {
         return 1;
     }
 
+    // Open debug output
+    FILE *db = fopen("debug.txt", "wb");
+    if (fp == NULL) {
+        perror("Error opening file");
+        return 1;
+    }
+
     Frame frames[WINDOW_SIZE];
     int base = 0;
     // Most recently ACKed packet
@@ -111,9 +118,10 @@ int main() {
                 do {
                     for (int i = 0; i < WINDOW_SIZE; ++i) {
                         if (frames[i].pkt.seqnum == next_seq_num) {
-                            // fprintf(fp, "=====Begin Packet %d=====\n", frames[i].pkt.seqnum);
+                            fprintf(db, "=====Begin Packet %d=====\n", frames[i].pkt.seqnum);
                             fwrite(frames[i].pkt.payload, 1, frames[i].pkt.length, fp);
-                            // fprintf(fp, "\n=====End Packet %d=====\n", frames[i].pkt.seqnum);
+                            fwrite(frames[i].pkt.payload, 1, frames[i].pkt.length, db);
+                            fprintf(db, "\n=====End Packet %d=====\n", frames[i].pkt.seqnum);
                             // printf("Writing to file: Pkt #%d\n", frames[i].pkt.seqnum);
                             next_seq_num++;
                             frames[i].pkt.seqnum = -1;
