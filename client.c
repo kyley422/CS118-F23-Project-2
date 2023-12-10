@@ -9,8 +9,11 @@
 
 #include "utils.h"
 
-#define WINDOW_SIZE 4
-#define TIMEOUT 0.0005
+#define DEFAULT_WINDOW_SIZE 1
+#define FRAMES_SIZE 1024
+// #define TIMEOUT 0.0005
+#define TIMEOUT 0.005
+
 
 typedef struct {
     struct packet pkt;
@@ -19,6 +22,80 @@ typedef struct {
 
 void send_packet(int send_sockfd, struct packet *pkt, struct sockaddr_in *server_addr_to, socklen_t addr_size) {
     sendto(send_sockfd, pkt, sizeof(struct packet), 0, (struct sockaddr *)server_addr_to, addr_size);
+}
+
+int compare_seq(const void *a, const void *b) {
+    if (((const Frame*)a)->pkt.seqnum < ((const Frame*)b)->pkt.seqnum) {
+        return -1;
+    }
+    else if (((const Frame*)a)->pkt.seqnum == ((const Frame*)b)->pkt.seqnum) {
+        return 0;
+    }
+    else {
+        return 1;
+    }
+}
+
+int shrink_window(Frame frames[], int old_cwnd, int new_cwnd) {
+    int new_seq;
+    printf("SHRINK WINDOW\n");
+    printf("=====OLD WINDOW=====\n");
+    for (int i = 0; i < old_cwnd; ++i) {
+        printf("%d,", frames[i].pkt.seqnum);
+    }
+
+    Frame frames_copy[FRAMES_SIZE];
+    int num_written = 0;
+    for (int i = 0; i < old_cwnd; ++i) {
+        frames_copy[i] = frames[i];
+    }
+
+    qsort(frames_copy, old_cwnd, sizeof(Frame), compare_seq);
+
+    for (int i = 0; i < new_cwnd; ++i) {
+        frames[i].pkt.seqnum = -1;
+    }
+    for (int i = 0; i < old_cwnd; ++i) {
+        if ((frames_copy[i].pkt.seqnum != -1) && (num_written < new_cwnd)) {
+            frames[i % new_cwnd] = frames_copy[i];
+            num_written++;
+        }
+    }
+    printf("\n=====NEW WINDOW=====\n");
+    for (int i = 0; i < new_cwnd; ++i) {
+        printf("%d,", frames[i].pkt.seqnum);
+    }
+    printf("\n====================\n");
+
+    // Reset sequence number, drop excess reads
+    new_seq = frames_copy[old_cwnd - 1].pkt.seqnum - 1;
+    printf("NEW SEQ #: %d\n", new_seq);
+    return new_seq;
+}
+
+void increment_window(Frame frames[], int cwnd) {
+    printf("Increment window before:\n");
+    for (int i=0; i<cwnd; ++i) {
+        printf("%d,", frames[i].pkt.seqnum);
+    }
+    printf("\n");
+
+    Frame frames_copy[FRAMES_SIZE];
+    for (int i = 0; i < cwnd; ++i) {
+        frames_copy[i] = frames[i];
+    }
+
+    // Zero out frames to properly place the new empty slot
+    for (int i = 0; i < cwnd + 1; ++i) {
+        frames[i].pkt.seqnum = -1;
+    }
+
+    // Use new modulo arithmetic to place in new cwnd frames
+    for (int i = 0; i < cwnd; ++i) {
+        if (frames_copy[i].pkt.seqnum != -1) {
+            frames[frames_copy[i].pkt.seqnum % (cwnd + 1)] = frames_copy[i];
+        }
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -32,6 +109,9 @@ int main(int argc, char *argv[]) {
     char buffer[PAYLOAD_SIZE];
     unsigned short seq_num = 0;
     unsigned short ack_num = 0;
+    int cwnd = DEFAULT_WINDOW_SIZE;
+    int fast_retransmit_count = 0;
+    int last_successful_ack;
 
     // read filename from command line argument
     if (argc != 2) {
@@ -81,12 +161,15 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    Frame frames[WINDOW_SIZE];
+    Frame frames[FRAMES_SIZE];
     int base = 0;
     int expected_ack_num = 0;
+    bool timeout_occured;
+    bool fast_recovery = false;
+    int ssthresh = 6;
 
     // Initialize array to empty
-    for (int i = 0; i < WINDOW_SIZE; i++) {
+    for (int i = 0; i < FRAMES_SIZE; i++) {
         frames[i].pkt.seqnum = -1;
         frames[i].sent_time = -1;
     }
@@ -98,18 +181,23 @@ int main(int argc, char *argv[]) {
     // Begin system clock
     clock_t begin = clock();
     while (1) {
-
+        printf("=====Begin RTT=====\n");
+        printf("cwnd: %d\n", cwnd); 
+        timeout_occured = false;
         clock_t end = clock();
-        for (int i=0; i<WINDOW_SIZE; ++i) {
+        for (int i=0; i<cwnd; ++i) {
             // printf("RTT: %f\n", ((double)(end - begin) / CLOCKS_PER_SEC) - frames[i].sent_time);
             if (frames[i].sent_time != -1 && ((double)(end - begin) / CLOCKS_PER_SEC) - frames[i].sent_time >= TIMEOUT) {
-                // printf("==========Timeout detected=========\n");
+                // Timeout detected
+                printf("==========Timeout detected=========\n");
                 build_packet(&pkt, frames[i].pkt.seqnum, ack_num, 0, 0, frames[i].pkt.length, frames[i].pkt.payload);
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
 
                 frames[i].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+                timeout_occured = true;
             }
         }
+        
 
         
 
@@ -120,25 +208,28 @@ int main(int argc, char *argv[]) {
             // Check if the acknowledgment is for a packet in the window
                 // printf("Received ACK#: %u\n", ack_pkt.acknum);
                 if (ack_pkt.acknum == expected_ack_num) {
-                // printf("Recieved ACK:%d same as Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
+                printf("Recieved ACK:%d same as Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
                 // Successful ACK advance by window by 1
-                frames[(ack_pkt.acknum) % WINDOW_SIZE].pkt.seqnum = -1;
-                frames[(ack_pkt.acknum) % WINDOW_SIZE].sent_time = -1;
+                frames[(ack_pkt.acknum) % cwnd].pkt.seqnum = -1;
+                frames[(ack_pkt.acknum) % cwnd].sent_time = -1;
                 expected_ack_num++;
 
-                // for (int i=0; i<WINDOW_SIZE; ++i) {
-                //     printf("%d,", frames[i].pkt.seqnum);
-                // }
-                // printf("\n");
-                // for (int i=0; i<WINDOW_SIZE; ++i) {
-                //     printf("%f,", frames[i].sent_time);
-                // }
-                // printf("\n");
+                // Congestion control: successful ACK, reset fast transmit counter
+                fast_retransmit_count = 0;
+                // Exit fast recovery, if we're in it
+                if  (fast_recovery) {
+                    printf("EXIT FAST RECOVERY\n");
+                    fast_recovery = false;
+                    seq_num = shrink_window(frames, cwnd, ssthresh);
+                    cwnd = ssthresh;
+                }
+
+                last_successful_ack = ack_pkt.acknum;
                 break;
 
               } else if (ack_pkt.acknum >= expected_ack_num) {
-                // printf("Recieved ACK:%d > Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
-                for (int i=0; i<WINDOW_SIZE; ++i) {
+                printf("Recieved ACK:%d > Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
+                for (int i=0; i<cwnd; ++i) {
                     if (frames[i].pkt.seqnum <= ack_pkt.acknum) {
                         frames[i].pkt.seqnum = -1;
                         frames[i].sent_time = -1;
@@ -146,58 +237,61 @@ int main(int argc, char *argv[]) {
                 }
                 expected_ack_num = ack_pkt.acknum+1;
 
-                // for (int i=0; i<WINDOW_SIZE; ++i) {
-                //     printf("%d,", frames[i].pkt.seqnum);
-                // }
-                // printf("\n");
-                // for (int i=0; i<WINDOW_SIZE; ++i) {
-                //     printf("%f,", frames[i].sent_time);
-                // }
-                // printf("\n");
+                // Exit fast recovery, if we're in it
+                fast_retransmit_count = 0;
+                if  (fast_recovery) {
+                    printf("EXIT FAST RECOVERY\n");
+                    fast_recovery = false;
+                    seq_num = shrink_window(frames, cwnd, ssthresh);
+                    cwnd = ssthresh;
+                }
+
+                last_successful_ack = ack_pkt.acknum;
+                
                 break;
               }
               else {
-                // printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
-                build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.length, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
+                // Duplicate packet
+                printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
+                build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, frames[(ack_pkt.acknum+1 - base) % cwnd].pkt.length, frames[(ack_pkt.acknum+1 - base) % cwnd].pkt.payload);
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
                 
                 clock_t end = clock();
-                frames[(ack_pkt.acknum + 1 - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
-
-                // for (int i=0; i<WINDOW_SIZE; ++i) {
-                //     printf("%d,", frames[i].pkt.seqnum);
-                // }
-                // printf("\n");
-                // for (int i=0; i<WINDOW_SIZE; ++i) {
-                //     printf("%f,", frames[i].sent_time);
-                // }
-                // printf("\n");
+                frames[(ack_pkt.acknum + 1 - base) % cwnd].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+                
+                fast_retransmit_count++;
                 break;
               }
             }
+            printf("Frame after ACK:\n");
+            for (int i=0; i<cwnd; ++i) {
+                printf("%d,", frames[i].pkt.seqnum);
+            }
+            printf("\n");
         }
 
         
-        for (int i = 0; i < WINDOW_SIZE; ++i) {
-            if (frames[i % WINDOW_SIZE].pkt.seqnum == -1) { 
+        for (int i = 0; i < cwnd; ++i) {
+            if (frames[i % cwnd].pkt.seqnum == -1) { 
+                // fseek(fp, -(cwnd* (PAYLOAD_SIZE)), SEEK_CUR);
                 size_t bytesRead = fread(buffer, 1, PAYLOAD_SIZE, fp);
-                // printf("sending seq#: %d, entry:%d\n", seq_num, frames[(seq_num - base) % WINDOW_SIZE].pkt.seqnum);
+                printf("Sending seq#: %d\n", seq_num);
 
                 build_packet(&pkt, seq_num, ack_num, 0, 0, bytesRead, buffer);
-                frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
+                frames[(seq_num - base) % cwnd].pkt = pkt;
                 
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
                 clock_t end = clock();
-                frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+                frames[(seq_num - base) % cwnd].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
 
 
                 // if (bytesRead == 0) {
                 //     build_packet(&pkt, seq_num, ack_num, 1, 0, bytesRead, buffer);
-                //     frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
+                //     frames[(seq_num - base) % cwnd].pkt = pkt;
 
                 //     send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
                 //     clock_t end = clock();
-                //     frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+                //     frames[(seq_num - base) % cwnd].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
 
                 //     break;
                 // }
@@ -210,18 +304,18 @@ int main(int argc, char *argv[]) {
         // setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
         if (feof(fp)) {
             build_packet(&pkt, seq_num, 0, 1, 0, 0, buffer);
-            frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
+            frames[(seq_num - base) % cwnd].pkt = pkt;
 
             sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
             clock_t end = clock();
-            frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+            frames[(seq_num - base) % cwnd].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
 
             while (1) {
-                if (((double)(end - begin) / CLOCKS_PER_SEC) - frames[(seq_num - base) % WINDOW_SIZE].sent_time >= TIMEOUT) {
+                if (((double)(end - begin) / CLOCKS_PER_SEC) - frames[(seq_num - base) % cwnd].sent_time >= TIMEOUT) {
                     // printf("IM IN FIRST\n");
                     sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
                     clock_t end = clock();
-                    frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+                    frames[(seq_num - base) % cwnd].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
                 }
                 if (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
                     // printf("Im in second: ack%d, seq%d\n", ack_pkt.acknum, seq_num);
@@ -234,7 +328,46 @@ int main(int argc, char *argv[]) {
             }
             
         }
+        // Successful window transfer, AD cwnd
+        if (cwnd <= ssthresh || fast_recovery) {
+            increment_window(frames, cwnd);
+            cwnd++;
+        }
+        
+        // if (all_acked) {
+        //     // Successful window transfer, AD cwnd
+        //     cwnd++;
+        // }
+        if (fast_retransmit_count >= 3 && !fast_recovery) {
+            // Engage fast recovery
+            fast_recovery = true;
+            printf("Engaged fast recovery\n");
 
+            int old_cwnd = cwnd;
+            ssthresh = (2 > cwnd/2) ? 2 : cwnd/2;
+            cwnd = ssthresh + 3;
+            seq_num = shrink_window(frames, old_cwnd, cwnd);
+            fast_retransmit_count = 0;
+
+            build_packet(&pkt, last_successful_ack, ack_num, 0, 0, 0, buffer);
+            sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
+            frames[(seq_num - base) % cwnd].pkt = pkt;
+            printf("FR: Retransmitting pkt #%d\n", seq_num);
+        }
+        else if (timeout_occured) {
+            // Timeout occurred
+            seq_num = shrink_window(frames, cwnd, DEFAULT_WINDOW_SIZE);
+            cwnd = DEFAULT_WINDOW_SIZE;
+
+            // Reset sequence number, drop excess reads
+            seq_num = seq_num - cwnd;
+        }
+        printf("Frame after reorganization:\n");
+        for (int i=0; i<cwnd; ++i) {
+            printf("%d,", frames[i].pkt.seqnum);
+        }
+        printf("\n");
+        printf("=====END RTT=====\n");
     }
     
     fclose(fp);
