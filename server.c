@@ -89,18 +89,20 @@ int main() {
             if (activity == -1) {
                 perror("Error in select");
                 return -1;
-            } else if (activity == 0) {
-                if (transmission_began) {
-                    printf("Timeout occurred. Resending ACKs...\n");
-                    // Send last successful ACK
-                    build_packet(&ack_pkt, 0, last_successful_ack, 0, 1, 1, "0");
-                    if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
-                        perror("Error sending ACK\n");
-                        return -1;
-                    }
-                    printf("Re:ACK pkt #%d\n", last_successful_ack);
-                }
-            } else {
+            } 
+            else if (activity == 0) {
+                // if (transmission_began) {
+                //     printf("Timeout occurred. Resending ACKs...\n");
+                //     // Send last successful ACK
+                //     build_packet(&ack_pkt, 0, last_successful_ack, 0, 1, 1, "0");
+                //     if (sendto(send_sockfd, &ack_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_to, addr_size) < 0) {
+                //         perror("Error sending ACK\n");
+                //         return -1;
+                //     }
+                //     printf("Re:ACK pkt #%d\n", last_successful_ack);
+                // }
+            } 
+            else {
                 struct packet received_pkt;
                 if ((recvfrom(listen_sockfd, (char *)&received_pkt, sizeof(struct packet), 0, (struct sockaddr *)&client_addr_from, &addr_size)) < 0) {
                     printf("Unable to receive client message\n");
@@ -114,8 +116,10 @@ int main() {
                 // Check if packet is last packet
                 if(received_pkt.last == 1) {
                     printf("TRANSMISSION COMPLETE\n");
-                    transmission_complete = true;
-                    break;
+                    fclose(fp);
+                    close(listen_sockfd);
+                    close(send_sockfd);
+                    return 0;
                 }
                 // Check if packet is outside of window
                 if (received_pkt.seqnum >= base && received_pkt.seqnum < base + WINDOW_SIZE) {
@@ -191,9 +195,4 @@ int main() {
             }
         }
     }
-
-    fclose(fp);
-    close(listen_sockfd);
-    close(send_sockfd);
-    return 0;
 }
