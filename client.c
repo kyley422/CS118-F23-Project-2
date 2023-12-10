@@ -5,16 +5,16 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "utils.h"
 
 #define WINDOW_SIZE 4
-
+#define TIMEOUT 0.0005
 
 typedef struct {
     struct packet pkt;
-    bool ack_received;
-    bool is_read;
+    double sent_time;
 } Frame;
 
 void send_packet(int send_sockfd, struct packet *pkt, struct sockaddr_in *server_addr_to, socklen_t addr_size) {
@@ -87,22 +87,50 @@ int main(int argc, char *argv[]) {
     // Initialize array to empty
     for (int i = 0; i < WINDOW_SIZE; i++) {
         frames[i].pkt.seqnum = -1;
+        frames[i].sent_time = -1;
     }
 
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
+
+    // Begin system clock
+    clock_t begin = clock();
     while (1) {
+
+        clock_t end = clock();
+        for (int i=0; i<WINDOW_SIZE; ++i) {
+            printf("RTT: %f\n", ((double)(end - begin) / CLOCKS_PER_SEC) - frames[i].sent_time);
+            if (frames[i].sent_time != -1 && ((double)(end - begin) / CLOCKS_PER_SEC) - frames[i].sent_time >= TIMEOUT) {
+                printf("==========Timeout detected=========\n");
+                build_packet(&pkt, frames[i].pkt.seqnum, ack_num, 0, 0, frames[i].pkt.length, frames[i].pkt.payload);
+                send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+
+                frames[i].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+            }
+        }
+
+        
+
         if (seq_num != 0) {
+            printf("Recieved Seq#: %d\n", seq_num);
         // Receive acknowledgments
           while (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
             // Check if the acknowledgment is for a packet in the window
-            // printf("Received ACK#: %u\n", ack_pkt.acknum);
-              if (ack_pkt.acknum == expected_ack_num) {
+                printf("Received ACK#: %u\n", ack_pkt.acknum);
+                if (ack_pkt.acknum == expected_ack_num) {
                 printf("Recieved ACK:%d same as Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
                 // Successful ACK advance by window by 1
                 frames[(ack_pkt.acknum) % WINDOW_SIZE].pkt.seqnum = -1;
+                frames[(ack_pkt.acknum) % WINDOW_SIZE].sent_time = -1;
                 expected_ack_num++;
 
                 for (int i=0; i<WINDOW_SIZE; ++i) {
                     printf("%d,", frames[i].pkt.seqnum);
+                }
+                printf("\n");
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    printf("%f,", frames[i].sent_time);
                 }
                 printf("\n");
                 break;
@@ -110,13 +138,19 @@ int main(int argc, char *argv[]) {
               } else if (ack_pkt.acknum >= expected_ack_num) {
                 printf("Recieved ACK:%d > Expected ACK:%d\n", ack_pkt.acknum, expected_ack_num);
                 for (int i=0; i<WINDOW_SIZE; ++i) {
-                    if (frames[i].pkt.seqnum <= ack_pkt.acknum)
+                    if (frames[i].pkt.seqnum <= ack_pkt.acknum) {
                         frames[i].pkt.seqnum = -1;
+                        frames[i].sent_time = -1;
+                    }
                 }
                 expected_ack_num = ack_pkt.acknum+1;
 
                 for (int i=0; i<WINDOW_SIZE; ++i) {
                     printf("%d,", frames[i].pkt.seqnum);
+                }
+                printf("\n");
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    printf("%f,", frames[i].sent_time);
                 }
                 printf("\n");
                 break;
@@ -125,13 +159,21 @@ int main(int argc, char *argv[]) {
                 printf("Recieved ACK:%d <  Expected ACK%d\n", ack_pkt.acknum, expected_ack_num);
                 build_packet(&pkt, ack_pkt.acknum+1, ack_num, 0, 0, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.length, frames[(ack_pkt.acknum+1 - base) % WINDOW_SIZE].pkt.payload);
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+                
+                clock_t end = clock();
+                frames[(ack_pkt.acknum + 1 - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+
                 for (int i=0; i<WINDOW_SIZE; ++i) {
                     printf("%d,", frames[i].pkt.seqnum);
                 }
                 printf("\n");
+                for (int i=0; i<WINDOW_SIZE; ++i) {
+                    printf("%f,", frames[i].sent_time);
+                }
+                printf("\n");
                 break;
               }
-          }
+            }
         }
 
         
@@ -142,16 +184,22 @@ int main(int argc, char *argv[]) {
 
                 build_packet(&pkt, seq_num, ack_num, 0, 0, bytesRead, buffer);
                 frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
-                frames[(seq_num - base) % WINDOW_SIZE].ack_received = false;
-                frames[(seq_num - base) % WINDOW_SIZE].is_read = true;
                 
                 send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+                clock_t end = clock();
+                frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
 
-                if (bytesRead == 0) {
-                    build_packet(&pkt, seq_num, ack_num, 1, 0, bytesRead, buffer);
-                    send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
-                    break;
-                }
+
+                // if (bytesRead == 0) {
+                //     build_packet(&pkt, seq_num, ack_num, 1, 0, bytesRead, buffer);
+                //     frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
+
+                //     send_packet(send_sockfd, &pkt, &server_addr_to, addr_size);
+                //     clock_t end = clock();
+                //     frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+
+                //     break;
+                // }
                 seq_num++;
             }
         }
@@ -160,8 +208,32 @@ int main(int argc, char *argv[]) {
         // tv.tv_usec = 0;
         // setsockopt(listen_sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
         if (feof(fp)) {
-            break;
+            build_packet(&pkt, seq_num, 0, 1, 0, 0, buffer);
+            frames[(seq_num - base) % WINDOW_SIZE].pkt = pkt;
+
+            sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
+            clock_t end = clock();
+            frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+
+            while (1) {
+                if (((double)(end - begin) / CLOCKS_PER_SEC) - frames[(seq_num - base) % WINDOW_SIZE].sent_time >= TIMEOUT) {
+                    printf("IM IN FIRST\n");
+                    sendto(send_sockfd, &pkt, sizeof(struct packet), 0, (struct sockaddr *)&server_addr_to, addr_size);
+                    clock_t end = clock();
+                    frames[(seq_num - base) % WINDOW_SIZE].sent_time = (double)(end - begin) / CLOCKS_PER_SEC;
+                }
+                if (recvfrom(listen_sockfd, &ack_pkt, sizeof(ack_pkt), 0, NULL, NULL) >= 0) {
+                    printf("Im in second: ack%d, seq%d\n", ack_pkt.acknum, seq_num);
+                    fclose(fp);
+                    close(listen_sockfd);
+                    close(send_sockfd);
+                    return 0;
+                    
+                }
+            }
+            
         }
+
     }
     
     fclose(fp);

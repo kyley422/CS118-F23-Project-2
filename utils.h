@@ -12,7 +12,6 @@
 #define SERVER_PORT 6002
 #define CLIENT_PORT_TO 5001
 #define PAYLOAD_SIZE 1024
-#define TIMEOUT 2
 #define MAX_SEQUENCE 1024
 
 
@@ -21,7 +20,7 @@
 // You may change this if you want to
 struct packet {
     int seqnum;
-    unsigned short acknum;
+    int acknum;
     char ack;
     char last;
     unsigned int length;
@@ -29,7 +28,7 @@ struct packet {
 };
 
 // Utility function to build a packet
-void build_packet(struct packet* pkt, unsigned short seqnum, unsigned short acknum, char last, char ack,unsigned int length, const char* payload) {
+void build_packet(struct packet* pkt, unsigned short seqnum, int acknum, char last, char ack,unsigned int length, const char* payload) {
     pkt->seqnum = seqnum;
     pkt->acknum = acknum;
     pkt->ack = ack;
